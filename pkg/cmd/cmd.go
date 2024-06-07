@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"github.com/panjf2000/ants/v2"
 	"github.com/spf13/cobra"
@@ -103,7 +104,7 @@ func NewNexusSyncCommand() *cobra.Command {
 			}
 
 			// 配置并发池
-			pool, err := ants.NewPool(255,
+			pool, err := ants.NewPool(16,
 				ants.WithPreAlloc(true),
 				ants.WithLogger(log.NewLogger("pool")))
 			if err != nil {
@@ -114,7 +115,7 @@ func NewNexusSyncCommand() *cobra.Command {
 			defer pool.Release()
 
 			if err := run(SetupSignalContext(), options); err != nil {
-				if context.Canceled == err {
+				if errors.Is(err, context.Canceled) {
 					logger.Infof("NexusSync canceled")
 				} else {
 					logger.Errorf("NexusSync failed: %v", err)
@@ -141,15 +142,19 @@ func run(ctx context.Context, opt *NexusSyncOptions) error {
 	var wg sync.WaitGroup
 	wg.Add(2)
 
+	logger.Info("fetching repo metadata ...")
 	// 拉取源 nexus 仓库的所有数据
 	var fromItems map[string]*NexusRepositoryItem
 	err = opt.pool.Submit(func() {
 		defer wg.Done()
 		var err error
+		logger.Infof("fetching source repo metadata '%s' @ '%s'", opt.From.URL, opt.From.Repo)
 		fromItems, err = fetchAll(newCtx, opt.From.URL, opt.From.Repo, opt.From.User, opt.From.Password)
 		if err != nil {
 			logger.Errorf("Fetch 'from' failed: %v", err)
 			cancelFunc()
+		} else {
+			logger.Infof("fetched source repo metadata '%s' @ '%s'", opt.From.URL, opt.From.Repo)
 		}
 	})
 	if err != nil {
@@ -161,10 +166,13 @@ func run(ctx context.Context, opt *NexusSyncOptions) error {
 	err = opt.pool.Submit(func() {
 		defer wg.Done()
 		var err error
+		logger.Infof("fetching destination repo metadata '%s' @ '%s'", opt.To.URL, opt.To.Repo)
 		toItems, err = fetchAll(newCtx, opt.To.URL, opt.To.Repo, opt.To.User, opt.To.Password)
 		if err != nil {
 			logger.Errorf("Fetch 'to' failed: %v", err)
 			cancelFunc()
+		} else {
+			logger.Infof("fetched destination repo metadata '%s' @ '%s'", opt.To.URL, opt.To.Repo)
 		}
 	})
 	if err != nil {
@@ -178,6 +186,7 @@ func run(ctx context.Context, opt *NexusSyncOptions) error {
 		return newCtx.Err()
 	default:
 	}
+	logger.Info("fetched repo metadata")
 
 	// 计算差异
 	diffItems := make(map[string]*NexusRepositoryItem)
@@ -188,7 +197,7 @@ func run(ctx context.Context, opt *NexusSyncOptions) error {
 	}
 	diffLen := len(diffItems)
 	if diffLen == 0 {
-		logger.Info("No-op")
+		logger.Info("synced no-op")
 		return nil
 	}
 
