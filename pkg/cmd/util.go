@@ -27,7 +27,6 @@ func init() {
 	}
 	httpClient = &http.Client{
 		Transport: transport,
-		// Timeout:   15 * time.Second,
 	}
 }
 
@@ -35,7 +34,6 @@ func makeHTTPRequest(ctx context.Context, method, url, username, password string
 	req, err := http.NewRequestWithContext(ctx, method, url, body)
 	if err == nil {
 		req.Header.Set("User-Agent", "nexus-sync/1.0.0")
-		req.Header.Set("Content-Type", "application/json; charset=utf-8")
 		req.Header.Set("Connection", "Close")
 		req.SetBasicAuth(username, password)
 	}

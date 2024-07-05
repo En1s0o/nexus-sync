@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"io"
-	"io/ioutil"
 	"net/http"
 	urlpkg "net/url"
 )
@@ -49,7 +48,7 @@ func fetch(ctx context.Context, url, username, password string) (*NexusRepositor
 		}
 	}()
 
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		return nil, err
 	}
@@ -88,7 +87,7 @@ func fetchAll(ctx context.Context, url, repo, username, password string) (map[st
 		}
 
 		for _, item := range repository.Items {
-			items[item.SHA1] = item
+			items[item.Path] = item
 		}
 
 		if repository.ContinuationToken == "" {
@@ -103,11 +102,11 @@ func fetchAll(ctx context.Context, url, repo, username, password string) (map[st
 }
 
 // transfer 将数据从源仓库传输到目的仓库
-func transfer(ctx context.Context, fromUrl, fromUsername, fromPassword, toUrl, toUsername, toPassword string) error {
+func transfer(ctx context.Context, opt *NexusSyncOptions, fromUrl, toUrl string) error {
 	newCtx, cancelFunc := context.WithCancel(ctx)
 	defer cancelFunc()
 
-	fromReq, err := makeHTTPRequest(newCtx, http.MethodGet, fromUrl, fromUsername, fromPassword, nil)
+	fromReq, err := makeHTTPRequest(newCtx, http.MethodGet, fromUrl, opt.From.User, opt.From.Password, nil)
 	if err != nil {
 		return err
 	}
@@ -118,7 +117,7 @@ func transfer(ctx context.Context, fromUrl, fromUsername, fromPassword, toUrl, t
 		_ = reader.Close()
 	}()
 
-	toReq, err := makeHTTPRequest(newCtx, http.MethodPut, toUrl, toUsername, toPassword, reader)
+	toReq, err := makeHTTPRequest(newCtx, http.MethodPut, toUrl, opt.From.User, opt.To.Password, reader)
 	if err != nil {
 		return err
 	}

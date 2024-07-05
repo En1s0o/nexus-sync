@@ -191,8 +191,9 @@ func run(ctx context.Context, opt *NexusSyncOptions) error {
 	// 计算差异
 	diffItems := make(map[string]*NexusRepositoryItem)
 	for _, from := range fromItems {
-		if toItems[from.SHA1] == nil {
-			diffItems[from.SHA1] = from
+		path := from.Path
+		if toItems[path] == nil || toItems[path].SHA1 != fromItems[path].SHA1 {
+			diffItems[path] = from
 		}
 	}
 	diffLen := len(diffItems)
@@ -214,24 +215,27 @@ func run(ctx context.Context, opt *NexusSyncOptions) error {
 	}
 
 	// 构造传输函数
-	failItems := &sync.Map{}
-	transferFunc := func(item *NexusRepositoryItem) {
+	transferFunc := func(item *NexusRepositoryItem) (err error) {
 		defer wg.Done()
 		logger.Info("process ", item.Path)
-		// 传输：从 from 下载，上传到 to
-		err := transfer(ctx,
-			item.DownloadUrl, opt.From.User, opt.From.Password,
-			item.fullUrl, opt.To.User, opt.To.Password)
-		if err != nil {
-			failItems.Store(item.SHA1, item)
+		for i := 0; i < 3; i++ {
+			// 传输：从 from 下载，上传到 to
+			err = transfer(ctx, opt, item.DownloadUrl, item.fullUrl)
+			if err == nil {
+				return
+			}
 		}
+		return
 	}
 
 	// 并发传输
+	failItems := &sync.Map{}
 	for _, item := range diffItems {
 		item := item
 		err = opt.pool.Submit(func() {
-			transferFunc(item)
+			if transErr := transferFunc(item); transErr != nil {
+				failItems.Store(item.Path, transErr)
+			}
 		})
 		if err != nil {
 			return err
@@ -242,7 +246,7 @@ func run(ctx context.Context, opt *NexusSyncOptions) error {
 	wg.Wait()
 	logger.Info("NexusSync finished")
 	failItems.Range(func(key, value interface{}) bool {
-		logger.Errorf("NexusSync failed: %s", value.(*NexusRepositoryItem).Path)
+		logger.Errorf("NexusSync failed: %s, %v", key, value)
 		return true
 	})
 
